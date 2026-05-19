@@ -91,13 +91,9 @@ gearxai package --model runs/gearxai_cnn_gate/model.onnx --output submission.zip
 
 ## 6. 推到 GitHub
 
-我已经把本地项目整理成可以直接建仓上传的结构。你在 GitHub 新建一个空仓库后，在本机运行：
+我已经把本地项目整理成可以直接建仓上传的结构，并初始化了本地 Git 仓库。你在 GitHub 新建一个空仓库后，在本机运行：
 
 ```bash
-git init
-git add .
-git commit -m "Initial GearXAI starter"
-git branch -M main
 git remote add origin git@github.com:<你的用户名>/<仓库名>.git
 git push -u origin main
 ```
