@@ -28,7 +28,7 @@ def main() -> None:
             model,
             torch.randn(1, 8, 100),
             output,
-            opset_version=17,
+            opset_version=18,
             input_names=["input"],
             output_names=["probabilities", "relevance_map"],
             dynamic_axes={
