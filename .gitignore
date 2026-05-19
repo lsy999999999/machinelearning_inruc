@@ -1,0 +1,27 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Runtime artifacts
+data/
+runs/
+checkpoints/
+outputs/
+submission/
+submission.zip
+
+# ML artifacts
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.log
+
+# Tool caches
+.cache/
+.hf_cache/
+.pytest_cache/
+.ruff_cache/

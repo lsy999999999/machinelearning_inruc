@@ -1,0 +1,31 @@
+data:
+  dataset_name: edi45/gearxai-dds-seu
+  config_name: windows_100
+  cache_dir:
+  train_split: train
+  val_split: validation
+  max_train_samples:
+  max_val_samples:
+  normalize: true
+  num_workers: 4
+
+model:
+  in_channels: 8
+  num_classes: 9
+  base_channels: 64
+  depth: 4
+  dropout: 0.10
+
+training:
+  output_dir: runs/gearxai_cnn_gate
+  seed: 42
+  epochs: 30
+  batch_size: 512
+  lr: 0.001
+  weight_decay: 0.01
+  label_smoothing: 0.03
+  sparse_weight: 0.0001
+  tv_weight: 0.0002
+  grad_clip_norm: 1.0
+  amp: true
+  save_every_epoch: false

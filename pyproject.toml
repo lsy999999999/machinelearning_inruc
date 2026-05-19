@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gearxai-project"
+version = "0.1.0"
+description = "PyTorch starter for GearXAI explainable gearbox fault diagnosis."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "datasets>=2.18.0",
+    "huggingface-hub>=0.22.0",
+    "numpy>=1.24.0",
+    "onnx>=1.15.0",
+    "onnxruntime>=1.17.0",
+    "pyyaml>=6.0.0",
+    "scikit-learn>=1.3.0",
+    "torch>=2.1.0",
+    "tqdm>=4.66.0",
+]
+
+[project.scripts]
+gearxai-train = "gearxai_project.train:main"
+gearxai-evaluate = "gearxai_project.evaluate:main"
+gearxai-export-onnx = "gearxai_project.export_onnx:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
