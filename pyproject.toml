@@ -24,7 +24,13 @@ dependencies = [
 [project.scripts]
 gearxai-train = "gearxai_project.train:main"
 gearxai-evaluate = "gearxai_project.evaluate:main"
+gearxai-evaluate-onnx = "gearxai_project.evaluate_onnx:main"
 gearxai-export-onnx = "gearxai_project.export_onnx:main"
+gearxai-inspect-data = "gearxai_project.inspect_data:main"
+gearxai-analyze-data = "gearxai_project.analyze_data:main"
+gearxai-prepare-devkit-data = "gearxai_project.prepare_devkit_data:main"
+gearxai-evaluate-devkit = "gearxai_project.evaluate_devkit:main"
+gearxai-package-devkit = "gearxai_project.package_devkit:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

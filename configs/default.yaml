@@ -1,31 +1,44 @@
 data:
   dataset_name: edi45/gearxai-dds-seu
   config_name: windows_100
-  cache_dir:
+  cache_dir: data/hf_cache
   train_split: train
   val_split: validation
   max_train_samples:
   max_val_samples:
   normalize: true
-  num_workers: 4
+  augment: false
+  noise_std: 0.0
+  scale_range: 0.0
+  time_shift: 0
+  channel_dropout: 0.0
+  num_workers: 0
 
 model:
   in_channels: 8
   num_classes: 9
-  base_channels: 64
-  depth: 4
-  dropout: 0.10
+  base_channels: 96
+  depth: 5
+  dropout: 0.18
+  energy_mix: 0.25
+  use_spectral: true
+  spectral_bins: 50
+  spectral_channels: 64
+  input_length: 100
 
 training:
   output_dir: runs/gearxai_cnn_gate
   seed: 42
   epochs: 30
-  batch_size: 512
+  batch_size: 384
   lr: 0.001
-  weight_decay: 0.01
-  label_smoothing: 0.03
+  weight_decay: 0.02
+  label_smoothing: 0.05
   sparse_weight: 0.0001
   tv_weight: 0.0002
+  cosine_min_lr_ratio: 0.05
+  patience:
   grad_clip_norm: 1.0
+  ema_decay: 0.995
   amp: true
   save_every_epoch: false

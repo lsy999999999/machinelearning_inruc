@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from typing import Any
+
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 import numpy as np
 import torch
@@ -47,7 +50,12 @@ class GearXAIDataConfig:
     max_train_samples: int | None = None
     max_val_samples: int | None = None
     normalize: bool = True
-    num_workers: int = 4
+    augment: bool = False
+    noise_std: float = 0.0
+    scale_range: float = 0.0
+    time_shift: int = 0
+    channel_dropout: float = 0.0
+    num_workers: int = 0
 
 
 def _first_existing(row: dict[str, Any], keys: tuple[str, ...]) -> Any:
@@ -77,6 +85,34 @@ def _as_signal_tensor(row: dict[str, Any], normalize: bool) -> torch.Tensor:
     return torch.from_numpy(np.ascontiguousarray(x))
 
 
+def _augment_signal(
+    x: np.ndarray,
+    noise_std: float,
+    scale_range: float,
+    time_shift: int,
+    channel_dropout: float,
+) -> np.ndarray:
+    if scale_range > 0:
+        scales = np.random.uniform(1.0 - scale_range, 1.0 + scale_range, size=(x.shape[0], 1)).astype(np.float32)
+        x = x * scales
+
+    if time_shift > 0:
+        shift = int(np.random.randint(-time_shift, time_shift + 1))
+        if shift:
+            x = np.roll(x, shift=shift, axis=1)
+
+    if noise_std > 0:
+        x = x + np.random.normal(0.0, noise_std, size=x.shape).astype(np.float32)
+
+    if channel_dropout > 0:
+        keep = (np.random.random(size=(x.shape[0], 1)) >= channel_dropout).astype(np.float32)
+        if keep.sum() == 0:
+            keep[np.random.randint(0, x.shape[0]), 0] = 1.0
+        x = x * keep
+
+    return x.astype(np.float32, copy=False)
+
+
 def _as_label(row: dict[str, Any]) -> int:
     value = _first_existing(row, ("fault_code", "fault_name", "fault", "fault_type", "label", "y", "target"))
     if isinstance(value, str):
@@ -104,9 +140,19 @@ class GearXAIWindows(Dataset):
         cache_dir: str | None = None,
         max_samples: int | None = None,
         normalize: bool = True,
+        augment: bool = False,
+        noise_std: float = 0.0,
+        scale_range: float = 0.0,
+        time_shift: int = 0,
+        channel_dropout: float = 0.0,
         seed: int = 42,
     ) -> None:
         self.normalize = normalize
+        self.augment = augment
+        self.noise_std = noise_std
+        self.scale_range = scale_range
+        self.time_shift = time_shift
+        self.channel_dropout = channel_dropout
         self.ds = load_dataset(dataset_name, config_name, split=split, cache_dir=cache_dir)
         if max_samples is not None:
             max_samples = min(max_samples, len(self.ds))
@@ -117,7 +163,16 @@ class GearXAIWindows(Dataset):
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
         row = self.ds[index]
-        x = _as_signal_tensor(row, normalize=self.normalize)
+        x = _as_signal_tensor(row, normalize=self.normalize).numpy()
+        if self.augment:
+            x = _augment_signal(
+                x,
+                noise_std=self.noise_std,
+                scale_range=self.scale_range,
+                time_shift=self.time_shift,
+                channel_dropout=self.channel_dropout,
+            )
+        x = torch.from_numpy(np.ascontiguousarray(x))
         y = torch.tensor(_as_label(row), dtype=torch.long)
         return x, y
 
@@ -135,6 +190,11 @@ def build_loaders(
         cache_dir=cfg.cache_dir,
         max_samples=cfg.max_train_samples,
         normalize=cfg.normalize,
+        augment=cfg.augment,
+        noise_std=cfg.noise_std,
+        scale_range=cfg.scale_range,
+        time_shift=cfg.time_shift,
+        channel_dropout=cfg.channel_dropout,
         seed=seed,
     )
     val_set = GearXAIWindows(

@@ -1,0 +1,14 @@
+{
+  "format": "[N, 8, 100]",
+  "source": "Hugging Face edi45/gearxai-dds-seu windows_100 cache",
+  "standardized_channel_mean": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ]
+}

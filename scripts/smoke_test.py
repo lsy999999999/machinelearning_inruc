@@ -5,11 +5,12 @@ from pathlib import Path
 
 import torch
 
+from gearxai_project.export_onnx import export_model_to_onnx, verify_onnx
 from gearxai_project.model import GearXAICNNConfig, GearXAICNNGate
 
 
 def main() -> None:
-    model = GearXAICNNGate(GearXAICNNConfig())
+    model = GearXAICNNGate(GearXAICNNConfig(use_spectral=True, spectral_channels=32))
     model.eval()
     x = torch.randn(2, 8, 100)
 
@@ -24,20 +25,9 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory() as tmpdir:
         output = Path(tmpdir) / "model.onnx"
-        torch.onnx.export(
-            model,
-            torch.randn(1, 8, 100),
-            output,
-            opset_version=18,
-            input_names=["input"],
-            output_names=["probabilities", "relevance_map"],
-            dynamic_axes={
-                "input": {0: "batch"},
-                "probabilities": {0: "batch"},
-                "relevance_map": {0: "batch"},
-            },
-        )
+        export_model_to_onnx(model, torch.randn(2, 8, 100), output, opset=18)
         assert output.exists()
+        verify_onnx(output, torch.randn(2, 8, 100))
 
     print("Smoke test passed.")
 

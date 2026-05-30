@@ -16,6 +16,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--max-val-samples", type=int)
+    parser.add_argument("--full-val", action="store_true", help="Evaluate the full validation split saved in the dataset cache.")
+    parser.add_argument("--num-workers", type=int)
     return parser.parse_args()
 
 
@@ -26,8 +28,12 @@ def main() -> None:
 
     if args.batch_size is not None:
         cfg["training"]["batch_size"] = args.batch_size
-    if args.max_val_samples is not None:
+    if args.full_val:
+        cfg["data"]["max_val_samples"] = None
+    elif args.max_val_samples is not None:
         cfg["data"]["max_val_samples"] = args.max_val_samples
+    if args.num_workers is not None:
+        cfg["data"]["num_workers"] = args.num_workers
 
     _, val_loader = build_loaders(
         cfg["data"],
@@ -39,7 +45,7 @@ def main() -> None:
     model.load_state_dict(checkpoint["model_state"])
 
     criterion = nn.CrossEntropyLoss(label_smoothing=float(cfg["training"].get("label_smoothing", 0.0)))
-    metrics = evaluate(model, val_loader, criterion, device)
+    metrics = evaluate(model, val_loader, criterion, device, num_classes=int(cfg["model"]["num_classes"]))
     print(metrics)
 
 
