@@ -1,0 +1,36 @@
+data:
+  dataset_name: edi45/gearxai-dds-seu
+  config_name: windows_100
+  cache_dir: data/hf_cache
+  train_split: train
+  val_split: validation
+  max_train_samples: 100000
+  max_val_samples: 20000
+  normalize: false
+  augment: false
+  noise_std: 0.0
+  scale_range: 0.0
+  time_shift: 0
+  channel_dropout: 0.0
+  num_workers: 0
+model:
+  in_channels: 8
+  num_classes: 9
+  hidden_size: 128
+  num_layers: 1
+  dropout: 0.0
+training:
+  output_dir: runs/kd_lstm_100k_a06
+  seed: 42
+  epochs: 15
+  batch_size: 2048
+  lr: 0.001
+  weight_decay: 0.0001
+  label_smoothing: 0.0
+  cosine_min_lr_ratio: 0.05
+  grad_clip_norm: 1.0
+  amp: true
+  save_every_epoch: true
+  distill_alpha: 0.6
+  distill_temperature: 2.0
+  teacher_cache_dir: runs/teacher_cache/logic_lstm_100k_s42

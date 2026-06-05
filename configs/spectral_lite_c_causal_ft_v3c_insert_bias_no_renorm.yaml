@@ -1,0 +1,61 @@
+data:
+  dataset_name: edi45/gearxai-dds-seu
+  config_name: windows_100
+  cache_dir: data/hf_cache
+  train_split: train
+  val_split: validation
+  max_train_samples: 100000
+  max_val_samples: 20000
+  normalize: true
+  augment: false
+  noise_std: 0.0
+  scale_range: 0.0
+  time_shift: 0
+  channel_dropout: 0.0
+  num_workers: 0
+
+model:
+  in_channels: 8
+  num_classes: 9
+  base_channels: 64
+  depth: 4
+  dropout: 0.18
+  energy_mix: 0.25
+  use_spectral: true
+  spectral_bins: 32
+  spectral_channels: 32
+  input_length: 100
+
+training:
+  output_dir: runs/causal_v3c_insert_bias_no_renorm
+  seed: 42
+  epochs: 6
+  batch_size: 256
+
+  # Fine-tuning learning rate: smaller than training from scratch.
+  lr: 0.00002
+  weight_decay: 0.01
+  label_smoothing: 0.02
+
+  # Existing relevance regularization, kept mild.
+  sparse_weight: 0.00005
+  tv_weight: 0.00010
+
+  # New causal relevance objective.
+  causal_delete_weight: 0.02
+  causal_insert_weight: 0.10
+  causal_delete_margin: 0.08
+  causal_insert_tolerance: 0.10
+  causal_fractions: [0.10, 0.20, 0.30]
+  causal_temperature: 0.15
+  causal_renormalize: false
+
+  cosine_min_lr_ratio: 0.10
+  patience:
+  grad_clip_norm: 1.0
+  ema_decay: 0.995
+  freeze_batchnorm_stats: true
+  amp: true
+
+  # 必须保留每一轮，因为最佳 faith 不一定等于最佳 F1。
+  save_every_epoch: true

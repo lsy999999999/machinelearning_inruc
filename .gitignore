@@ -4,6 +4,8 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.conda-gpu/
+.vscode/
 
 # Runtime artifacts
 data/
@@ -12,6 +14,10 @@ checkpoints/
 outputs/
 submission/
 submission.zip
+diagnosis_*/
+external/
+latest_src_configs.zip
+logic_lstm_student_patch.zip
 
 # ML artifacts
 *.pt
