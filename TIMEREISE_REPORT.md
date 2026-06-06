@@ -152,3 +152,58 @@ zip_sha256=42e6438a9fdb1afcdd1508cb0db5d8aeed0366efa9d9c7cc7969cb0558ea4513
 这个候选的 public proxy 比当前主提交高 `0.0000649`，提升很小，但它来自伪工况 robust 聚合，理论上比单一全局 TimeREISE factor 更能降低 public split 过拟合风险。因此它可以作为新的替换候选；若策略偏保守，仍可保留原 `mix50_tb035` 主提交，把 robust 作为消融和 hidden-risk mitigation 结果汇报。
 
 Mechanical-aware 第一版不保留为替换候选，原因是轻量 proxy 虽然符合机械直觉，但 ONNX 节点和 relevance 分布改变导致 simplicity 明显下降，faith 也同步下降。Contrastive 第一版把 faith 提到 `0.752718`，说明 top2 抑制确实能强化判别解释；但 `TopK` 等算子增加复杂度，public proxy 低于主提交，适合作为报告中的诊断性消融，不适合作为最终提交。
+
+## Low-complexity Offline Innovation
+
+第一版 mechanical-aware 和 contrastive 的共同问题是在线 ONNX 算子增加了复杂度。第二轮把创新全部折叠到离线 `weights_9x8x100`，ONNX 结构保持为 TimeREISE 的轻量形式：
+
+```text
+relevance = sqrt(abs(input)) * soft_class_weighted_factor
+```
+
+新增脚本：
+
+```text
+tools/run_logic_timereise_offline_innovation_search.py
+```
+
+离线 mechanical prior 使用相邻差分能量、局部峰值、绝对幅值和 crest factor，在训练样本上按预测类别、通道、时间块聚合，然后直接融合进 factor。离线 contrastive 不再使用 `TopK`，而是在 factor 级别抑制其他类别共享的高响应区域：
+
+```text
+factor_c = factor_c - lambda * max(mean_factor_other_classes - 1, 0)
+```
+
+小搜索结果：
+
+| candidate | faith | deletion_auc | insertion_auc | macro_f1 | simplicity | public_proxy | decision |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| robust_mean_mix50_tb035 | 0.751933 | 0.186384 | 0.690251 | 0.983717 | 0.901616 | 0.481097 | previous robust best |
+| robust_offline_contrast_mix50_tb035_l050 | 0.752061 | 0.186942 | 0.691064 | 0.983717 | 0.901611 | 0.481146 | new best |
+| robust_offline_contrast_mix50_tb035_l080 | 0.752011 | 0.186864 | 0.690886 | 0.983717 | 0.901611 | 0.481126 | backup |
+| robust_offline_mech_mix50_tb035_g020 | 0.751253 | 0.187447 | 0.689954 | 0.983717 | 0.901612 | 0.480824 | do not replace |
+| robust_offline_combo_mix50_tb035_g020_l050 | 0.751452 | 0.187331 | 0.690234 | 0.983717 | 0.901610 | 0.480903 | do not replace |
+
+新的最佳候选是：
+
+```text
+runs/final_candidates/logic_timereise_robust_offline_contrast_l050_bestproxy_submission.zip
+```
+
+Package inspect 已通过：
+
+```text
+valid=true
+eligible=true
+model_sha256=20c3337f0c56f580bcbdb5b4ef27b2b3996b6ffbef6082789d26be2510cb554b
+zip_sha256=c75ff97fa37cc63182ab55e6c9b4626936b2e4d987b0f3b19f5199a3bc98334b
+```
+
+这个候选比原 `mix50_tb035` 提升 `0.000114` public proxy，比 robust-only 候选提升 `0.000049`。提升仍然很小，但它同时满足两个条件：ONNX complexity 基本不变，faithfulness 和 insertion 曲线有增益。因此当前替换优先级更新为：
+
+```text
+1. logic_timereise_robust_offline_contrast_l050_bestproxy_submission.zip
+2. logic_timereise_robust_mean_mix50_tb035_bestproxy_submission.zip
+3. logic_timereise_50k_b20_mix50_tb035_bestproxy_submission.zip
+```
+
+Mechanical offline 版本保留为消融，不作为提交候选。它证明了低复杂度实现可以把 simplicity 拉回 `0.9016` 附近，但本轮 mechanical prior 与 public faithfulness 不同向；除非后续有 hidden mechanical 反馈，否则不再扩大这条搜索。
