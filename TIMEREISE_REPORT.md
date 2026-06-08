@@ -207,3 +207,105 @@ zip_sha256=c75ff97fa37cc63182ab55e6c9b4626936b2e4d987b0f3b19f5199a3bc98334b
 ```
 
 Mechanical offline 版本保留为消融，不作为提交候选。它证明了低复杂度实现可以把 simplicity 拉回 `0.9016` 附近，但本轮 mechanical prior 与 public faithfulness 不同向；除非后续有 hidden mechanical 反馈，否则不再扩大这条搜索。
+
+## Faith-targeted Marginal TimeREISE
+
+进一步检查 devkit 代码后，faithfulness 的核心是按 relevance top-k 做 0%, 10%, ..., 100% 的 deletion / insertion AUC：
+
+```text
+faith = (insertion_auc + (1 - deletion_auc)) / 2
+```
+
+因此第三轮不再只使用全局 TimeREISE drop / keep 模板，而是直接估计每个类别、通道、时间块的边际 faith gain：
+
+```text
+drop_gain   = p(original, predicted_class) - p(deleted_block, predicted_class)
+insert_gain = p(inserted_block, predicted_class) - p(zero_baseline, predicted_class)
+```
+
+新增脚本：
+
+```text
+tools/run_logic_timereise_marginal_search.py
+```
+
+实现细节：
+
+- 使用 devkit 相同的 zero baseline。
+- 同时统计正向 gain 和负向 gain，负向 gain 表示该块被删除/插入后反而不利于 faith 排序。
+- 生成仍然保持低复杂度 ONNX 形式：
+
+```text
+relevance = sqrt(abs(input)) * soft_class_weighted_factor
+```
+
+关键排查结果：
+
+| branch | best tag | faith | deletion_auc | insertion_auc | macro_f1 | simplicity | public_proxy | decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| previous best | robust_offline_contrast_mix50_tb035_l050 | 0.752061 | 0.186942 | 0.691064 | 0.983717 | 0.901611 | 0.481146 | previous best |
+| train50k raw b20 | marg_dw050_tb025_l050 | 0.748068 | 0.162651 | 0.658786 | 0.983717 | 0.901616 | 0.479550 | rejected, insertion drops too much |
+| public val5k b20 | marg_dw070_p025_tb015 | 0.754130 | 0.169384 | 0.677645 | 0.983717 | 0.901616 | 0.481975 | improves, but not best |
+| public val5k b10 | marg_dw050_p010_tb015 | 0.770607 | 0.146884 | 0.688098 | 0.983717 | 0.901616 | 0.488566 | new public best |
+
+b10 明显优于 b20，原因是官方 faith 每 10% 做一次 top-k mask，10 个时间块更贴近这个评估粒度。最优参数为：
+
+```text
+num_bins=10
+drop_weight=0.50
+negative_gain_penalty=0.10
+time_beta=0.15
+contrast_lambda=0.00
+```
+
+新的最佳候选是：
+
+```text
+runs/final_candidates/logic_timereise_marginal_val5k_b10_bestproxy_submission.zip
+```
+
+Package inspect 已通过：
+
+```text
+valid=true
+eligible=true
+model_sha256=5d6b744cc549550f89168b28a719a6a0ded8545d2d44a272347a3ac070a865cc
+zip_sha256=571196dc84c725c7530ff4b9a0162d36e09337f8a175016304798d844b1d6636
+```
+
+当前 public 替换优先级更新为：
+
+```text
+1. logic_timereise_marginal_val5k_b10_bestproxy_submission.zip
+2. logic_timereise_robust_offline_contrast_l050_bestproxy_submission.zip
+3. logic_timereise_robust_mean_mix50_tb035_bestproxy_submission.zip
+4. logic_timereise_50k_b20_mix50_tb035_bestproxy_submission.zip
+```
+
+风险说明：`marginal_val5k_b10` 是 public-validation faith-targeted 校准，public faith 提升很明确，但 hidden distribution 的机械 alignment 仍然不可见。如果目标是最大化 public faith / public proxy，应提交该候选；如果策略极端保守、重点押 hidden 稳定性，则保留 `robust_offline_contrast_l050` 作为备选。
+
+### Follow-up Exhaustive Checks
+
+在 `marginal_val5k_b10` 之后又排查了两个可能方向：
+
+1. 更细粒度 TimeREISE：`b25` / `b50`
+2. 样本级 relevance gate：`abs` / `diff` / `peak` / `local mean`
+
+结果如下：
+
+| branch | best tag | faith | deletion_auc | insertion_auc | macro_f1 | simplicity | public_proxy | decision |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| current best b10 | marg_dw050_p010_tb015 | 0.770607 | 0.146884 | 0.688098 | 0.983717 | 0.901616 | 0.488566 | keep |
+| b25 search | marg_dw070_p010_tb015 | 0.751326 | 0.173709 | 0.676361 | 0.983717 | 0.901616 | 0.480854 | rejected |
+| b50 narrow | marg_dw050_p010_tb015 | 0.736649 | 0.195607 | 0.668905 | 0.983717 | 0.901616 | 0.474983 | rejected |
+| sample gate | gate_abs_g030 | 0.770180 | 0.148142 | 0.688502 | 0.983717 | 0.895942 | 0.487260 | rejected |
+
+排查结论：
+
+- 更细粒度不是越细越好。官方 faith 每 10% 做一次 mask，`b10` 正好对齐这个粒度；`b25/b50` 统计噪声更大，deletion / insertion 都不如 `b10`。
+- 样本级 gate 没有超过当前 best。最接近的 `abs_g030` faith 仍略低于 `0.770607`，并且新增 ONNX 算子把 simplicity 从 `0.901616` 拉低到 `0.895942`。
+- 当前最佳仍然是：
+
+```text
+runs/final_candidates/logic_timereise_marginal_val5k_b10_bestproxy_submission.zip
+```

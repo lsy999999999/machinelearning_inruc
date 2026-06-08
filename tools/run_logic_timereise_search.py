@@ -223,7 +223,19 @@ def run_eval_subprocess(model: str, output: Path, args: argparse.Namespace) -> N
         "--output",
         str(output),
     ]
-    subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    last_output = ""
+    for attempt in range(1, 4):
+        completed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        last_output = completed.stdout
+        if completed.returncode == 0 and output.exists():
+            return
+        if output.exists():
+            output.unlink()
+        print(
+            f"Eval failed for {model} attempt={attempt} returncode={completed.returncode}; retrying",
+            flush=True,
+        )
+    raise RuntimeError(f"Could not evaluate {model} after 3 attempts.\n{last_output[-2000:]}")
 
 
 def report_scores(report_path: Path) -> tuple[float, float, float, float, float, float]:
