@@ -74,10 +74,12 @@ def main() -> None:
             continue
         candidate_weights[name] = extract_timereise_weights(model_path)
 
-    current_path = make_variant(base_model, output_dir, "coord_start", current, hard=False)
-    current_metrics = evaluate_model(current_path, eval_dir / "coord_start.json", args)
+    start_tag = "coord_search_start"
+    current_path = make_variant(base_model, output_dir, start_tag, current, hard=False)
+    current_report = eval_dir / f"{start_tag}.json"
+    current_metrics = evaluate_model(current_path, current_report, args)
     history: list[dict[str, object]] = [
-        {"tag": "coord_start", "model": str(current_path), **current_metrics},
+        {"tag": start_tag, "model": str(current_path), **current_metrics},
     ]
     print(
         f"start faith={current_metrics['faith']:.6f} del={current_metrics['deletion']:.6f} "
@@ -110,8 +112,10 @@ def main() -> None:
                 step += 1
                 current = best_weights
                 current_metrics = best_metrics
-                current_path = make_variant(base_model, output_dir, f"coord_step{step}", current, hard=False)
-                current_metrics = evaluate_model(current_path, eval_dir / f"coord_step{step}.json", args)
+                step_tag = f"coord_search_update{step}"
+                current_path = make_variant(base_model, output_dir, step_tag, current, hard=False)
+                current_report = eval_dir / f"{step_tag}.json"
+                current_metrics = evaluate_model(current_path, current_report, args)
                 improved_in_pass = True
                 row = {
                     "step": step,
@@ -141,7 +145,7 @@ def main() -> None:
     candidate_model = Path("runs/candidates") / f"{args.copy_prefix}_bestproxy.onnx"
     candidate_report = Path("runs/candidates") / f"{args.copy_prefix}_bestproxy_devkit.json"
     candidate_model.write_bytes(current_path.read_bytes())
-    candidate_report.write_bytes((eval_dir / f"coord_step{step}.json" if step > 0 else eval_dir / "coord_start.json").read_bytes())
+    candidate_report.write_bytes(current_report.read_bytes())
     print(f"Copied best: {candidate_model}", flush=True)
 
     if not args.no_package:
