@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+from json import JSONDecodeError
 from pathlib import Path
 
 import numpy as np
@@ -52,9 +53,16 @@ def score_and_package_manifest(
     for index, row in enumerate(manifest, 1):
         tag = str(row["tag"])
         report_path = eval_dir / f"{tag}.json"
-        if not report_path.exists():
+        if report_path.exists():
+            try:
+                faith, deletion, insertion, f1, simplicity, proxy = report_scores(report_path)
+            except (JSONDecodeError, KeyError):
+                report_path.unlink()
+                run_eval_subprocess(str(row["model"]), report_path, args)
+                faith, deletion, insertion, f1, simplicity, proxy = report_scores(report_path)
+        else:
             run_eval_subprocess(str(row["model"]), report_path, args)
-        faith, deletion, insertion, f1, simplicity, proxy = report_scores(report_path)
+            faith, deletion, insertion, f1, simplicity, proxy = report_scores(report_path)
         scored = {
             **row,
             "report": str(report_path),

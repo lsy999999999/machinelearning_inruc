@@ -1,0 +1,178 @@
+{
+  "classification": {
+    "confusion_matrix": [
+      [
+        520,
+        1,
+        0,
+        10,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        548,
+        0,
+        1,
+        4,
+        0,
+        0,
+        0,
+        1
+      ],
+      [
+        0,
+        0,
+        582,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        3,
+        0,
+        0,
+        545,
+        2,
+        3,
+        0,
+        2,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        2,
+        540,
+        0,
+        0,
+        6,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        570,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        536,
+        0,
+        9
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        7,
+        523,
+        1
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        4,
+        578
+      ]
+    ],
+    "macro_f1": 0.9882802869515329
+  },
+  "faithfulness": {
+    "deletion_auc": 0.12159911915659906,
+    "deletion_curve": [
+      0.9971725344657898,
+      0.21029384434223175,
+      0.06753856688737869,
+      0.040789101272821426,
+      0.03292054310441017,
+      0.02459040842950344,
+      0.03671211749315262,
+      0.05386500805616379,
+      0.09174342453479767,
+      0.10305242985486984,
+      0.1117989718914032
+    ],
+    "faith_score": 0.8000648278743028,
+    "insertion_auc": 0.7217287749052047,
+    "insertion_curve": [
+      0.1117989718914032,
+      0.41690677404403687,
+      0.4574587345123291,
+      0.5365297794342041,
+      0.6726807355880737,
+      0.7880914807319641,
+      0.8735576868057251,
+      0.9421475529670715,
+      0.9824457764625549,
+      0.9929834008216858,
+      0.9971725344657898
+    ]
+  },
+  "mechanical": {
+    "expected_band_mass": null,
+    "mechanical_score": null,
+    "noise_stability": null,
+    "note": "official mechanical score requires a private band config"
+  },
+  "runtime": {
+    "inference_seconds": 0.11000531199988473,
+    "load_seconds": 0.0010015689999818278,
+    "output_names": [
+      "probabilities",
+      "timereise_condition_rowcoord_update5_relevance"
+    ],
+    "rss_mb": 217.01953125
+  },
+  "samples": 5000,
+  "score": {
+    "eligible": true,
+    "explainability_score": null,
+    "reason": "mechanical score unavailable; pass official band config"
+  },
+  "simplicity": {
+    "onnx_size_mb": 0.3050689697265625,
+    "operator_count": 24,
+    "parameter_count": 79020,
+    "simplicity_score": 0.9016145740026213
+  },
+  "split": "validation",
+  "validation": {
+    "inference_seconds": 0.0010266270001011435,
+    "input_name": "windows",
+    "load_seconds": 0.007741440999780025,
+    "probability_output": "probabilities",
+    "probability_sum_max": 1.0,
+    "probability_sum_min": 0.9999999403953552,
+    "relevance_max": 5.461386680603027,
+    "relevance_min": 0.008599736727774143,
+    "relevance_output": "timereise_condition_rowcoord_update5_relevance",
+    "samples": 8,
+    "valid": true
+  }
+}

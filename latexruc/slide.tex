@@ -1,0 +1,780 @@
+\documentclass[aspectratio=169]{beamer}
+\usepackage{ctex,hyperref}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,booktabs,array,multicol}
+\usepackage{graphicx,xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,calc,shapes.geometric}
+\usepackage{RenminUniv}
+
+\author[刘师妤]{刘师妤}
+\title[GearXAI 解释型齿轮箱故障诊断]{GearXAI 解释型齿轮箱故障诊断}
+\subtitle{多通道振动时间序列的分类与可解释性优化}
+\institute[中国人民大学信息学院]{中国人民大学信息学院\\学号：2024201568}
+\date{2026年6月}
+
+\AtBeginSection[]{}
+\AtBeginSubsection[]{}
+
+\definecolor{rucRed}{RGB}{151,31,48}
+\definecolor{softRed}{RGB}{248,236,238}
+\definecolor{softBlue}{RGB}{236,242,250}
+\definecolor{softGreen}{RGB}{236,248,241}
+\definecolor{darkGray}{RGB}{55,55,55}
+\setbeamertemplate{navigation symbols}{}
+\setbeamersize{text margin left=0.75cm,text margin right=0.75cm}
+
+\newcommand{\metric}[2]{\textbf{#1}\quad{\color{rucRed}#2}}
+\newcommand{\codepath}[1]{{\scriptsize\ttfamily\detokenize{#1}}}
+\newcommand{\finalzip}{\texttt{runs/final\_candidates/}\\\texttt{logic\_timereise\_condition\_prior\_rowcoord\_bestproxy\_submission.zip}}
+\newcommand{\finalonnx}{\texttt{runs/candidates/}\\\texttt{logic\_timereise\_condition\_prior\_rowcoord\_bestproxy.onnx}}
+\newcommand{\zipsha}{\texttt{5801584363dfa83ab5534a248a618b4051a107843b2c2c9ff055cbacbdd2becd}}
+\newcommand{\tightitems}{\setlength{\itemsep}{0.32em}}
+
+\begin{document}
+\kaishu
+
+\begin{frame}
+    \titlepage
+\end{frame}
+
+\begin{frame}{汇报结构}
+    \tableofcontents
+\end{frame}
+
+\section{任务分析}
+
+\begin{frame}{01 任务定义：解释型故障诊断}
+    \small
+    \begin{columns}[T,onlytextwidth]
+        \begin{column}{0.50\textwidth}
+            \begin{block}{输入}
+                8 通道振动时间序列窗口：
+                \[
+                    x \in \mathbb{R}^{N \times 8 \times 100}
+                \]
+                每个样本覆盖多个传感器通道和短时局部振动模式。
+            \end{block}
+            \begin{block}{输出}
+                \begin{itemize}
+                    \tightitems
+                    \item 9 类齿轮箱/轴承状态概率
+                    \item 同尺寸 relevance map：$N \times 8 \times 100$
+                    \item 最终提交为 CPU 可运行 ONNX
+                \end{itemize}
+            \end{block}
+        \end{column}
+        \begin{column}{0.45\textwidth}
+            \begin{block}{建模目标}
+                \begin{itemize}
+                    \tightitems
+                    \item 准确识别 9 类齿轮箱/轴承状态
+                    \item 输出可用于扰动验证的解释图
+                    \item 在 CPU-only ONNX 环境中稳定推理
+                    \item 同时平衡 Macro-F1、Faith 与 Simplicity
+                \end{itemize}
+            \end{block}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+\begin{frame}{02 数据与故障类别}
+    \small
+    \begin{columns}[T,onlytextwidth]
+        \begin{column}{0.48\textwidth}
+            \begin{table}
+                \centering
+                \small
+                \begin{tabular}{cl}
+                    \toprule
+                    标签 & 含义 \\
+                    \midrule
+                    HEA & healthy \\
+                    CTF & chipped tooth fault \\
+                    MTF & missing tooth fault \\
+                    RCF & root crack fault \\
+                    SWF & surface wear fault \\
+                    BWF & ball fault \\
+                    CWF & combination fault \\
+                    IRF & inner race fault \\
+                    ORF & outer race fault \\
+                    \bottomrule
+                \end{tabular}
+            \end{table}
+        \end{column}
+        \begin{column}{0.48\textwidth}
+            \begin{itemize}
+                \tightitems
+                \item 齿轮类故障：局部崩齿、缺齿、齿根裂纹、齿面磨损
+                \item 轴承类故障：滚珠、内圈、外圈与组合故障
+                \item 物理上常表现为局部冲击、重复冲击、能量变化和通道差异
+                \item 模型需要同时利用幅值、时间局部形态和通道关联
+            \end{itemize}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+\begin{frame}{03 评价指标与优化目标}
+    \small
+    \begin{block}{老师确认的综合分}
+        \[
+            \mathrm{Score}=0.6 \times \mathrm{MacroF1}
+            +0.3 \times \mathrm{Faith}
+            +0.1 \times \mathrm{Simplicity}
+        \]
+    \end{block}
+    \begin{columns}[T,onlytextwidth]
+        \begin{column}{0.32\textwidth}
+            \begin{block}{Macro-F1}
+                9 个类别分别计算 F1 后取平均，避免只优化样本多或容易的类别。
+            \end{block}
+        \end{column}
+        \begin{column}{0.32\textwidth}
+            \begin{block}{Faith}
+                按 relevance top-k 做 deletion / insertion：
+                \[
+                \frac{\mathrm{InsAUC}+1-\mathrm{DelAUC}}{2}
+                \]
+            \end{block}
+        \end{column}
+        \begin{column}{0.32\textwidth}
+            \begin{block}{Simplicity}
+                由参数量、ONNX 算子数和模型大小决定，鼓励紧凑模型。
+            \end{block}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+\begin{frame}{04 评测流程与 Faithfulness}
+    \small
+    \begin{columns}[T,onlytextwidth]
+        \begin{column}{0.47\textwidth}
+            \begin{center}
+            \begin{tikzpicture}[
+                font=\scriptsize,
+                node distance=0.62cm,
+                box/.style={draw,rounded corners,align=center,minimum width=2.7cm,minimum height=0.55cm,fill=white,inner sep=2pt},
+                >=Latex
+            ]
+                \node[box,fill=softBlue] (onnx) {ONNX 模型};
+                \node[box,below=of onnx] (io) {概率输出 + relevance};
+                \node[box,fill=softGreen,below=of io] (gate) {Macro-F1 / 格式检查};
+                \node[box,fill=softRed,below=of gate] (score) {Faith + Simplicity};
+                \draw[->] (onnx)--(io);
+                \draw[->] (io)--(gate);
+                \draw[->] (gate)--(score);
+            \end{tikzpicture}
+            \end{center}
+        \end{column}
+        \begin{column}{0.50\textwidth}
+            \begin{block}{Faithfulness}
+                relevance 归一化后按 top-k 排序做两条曲线：
+                \begin{itemize}
+                    \tightitems
+                    \item Deletion：删除高 relevance 区域，置信度下降越快越好
+                    \item Insertion：插入高 relevance 区域，置信度恢复越快越好
+                \end{itemize}
+                \[
+                    \mathrm{Faith}=\frac{\mathrm{InsAUC}+1-\mathrm{DelAUC}}{2}
+                \]
+            \end{block}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+\section{最终结果}
+
+\begin{frame}{05 最终提交与本地 devkit 指标}
+    \begin{columns}[T,onlytextwidth]
+        \begin{column}{0.44\textwidth}
+            \begin{block}{最终提交包}
+                \centering
+                \scriptsize
+                \finalzip
+            \end{block}
+            \begin{block}{对应模型}
+                \centering
+                \scriptsize
+                \finalonnx
+            \end{block}
+            \begin{block}{校验}
+                \begin{itemize}
+                    \tightitems
+                    \item valid = true
+                    \item eligible = true
+                    \item samples = 5000
+                    \item operator count = 24
+                    \item parameter count = 79020
+                \end{itemize}
+            \end{block}
+        \end{column}
+        \begin{column}{0.52\textwidth}
+            \begin{table}
+                \centering
+                \small
+                \begin{tabular}{lr}
+                    \toprule
+                    指标 & 数值 \\
+                    \midrule
+                    Macro-F1 & 0.988280287 \\
+                    Faith & \textbf{0.800064828} \\
+                    Deletion AUC & 0.121599119 \\
+                    Insertion AUC & 0.721728775 \\
+                    Simplicity & 0.901614574 \\
+                    Teacher score & \textbf{0.923149078} \\
+                    \bottomrule
+                \end{tabular}
+            \end{table}
+            \begin{block}{相对上一版 final\_micro\_morph}
+                F1 不变，Faith 增加 $8.355\times10^{-5}$，综合分增加约 $2.444\times10^{-5}$。
+            \end{block}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+\begin{frame}{06 最终模型复核：错误分布与复杂度}
+    \small
+    \begin{columns}[T,onlytextwidth]
+        \begin{column}{0.52\textwidth}
+            \begin{table}
+                \centering
+                \scriptsize
+                \begin{tabular}{lcc}
+                    \toprule
+                    项目 & 数值 & 说明 \\
+                    \midrule
+                    正确样本 & 4942/5000 & overall acc = 0.9884 \\
+                    主要混淆1 & HEA$\rightarrow$RCF: 10 & 正常/齿根裂纹边界 \\
+                    主要混淆2 & CWF$\rightarrow$ORF: 9 & 组合故障被单故障吸收 \\
+                    主要混淆3 & IRF$\rightarrow$CWF: 7 & 内圈/组合故障局部相似 \\
+                    ONNX大小 & 0.305 MB & CPU-only 可部署 \\
+                    推理时间 & 0.110 s & devkit 5000样本统计 \\
+                    \bottomrule
+                \end{tabular}
+            \end{table}
+        \end{column}
+        \begin{column}{0.44\textwidth}
+            \begin{block}{提交哈希}
+                \scriptsize
+                \zipsha
+            \end{block}
+            \begin{block}{关键判断}
+                最终版本没有牺牲分类概率分支；收益来自 relevance map 的类别行替换，使 top-k 扰动顺序更接近真实判别证据。
+            \end{block}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+\section{实施方法}
+
+\begin{frame}{07 我们的训练与解释优化流程}
+    \centering
+    \begin{tikzpicture}[
+        font=\scriptsize,
+        box/.style={draw,rounded corners,align=center,minimum height=0.58cm,minimum width=1.72cm,fill=white,inner sep=2pt},
+        blue/.style={box,fill=softBlue},
+        red/.style={box,fill=softRed},
+        green/.style={box,fill=softGreen},
+        >=Latex
+    ]
+        \node[blue] (data) at (0,3.15) {数据准备\\8通道$\times$100点};
+        \node[blue] (audit) at (2.1,3.15) {数据审计\\类别/工况/异常};
+        \node[red] (base) at (4.25,3.15) {LogicLSTM\\高F1主干};
+        \node[red] (calib) at (6.4,3.15) {logit校准\\bias/scale};
+        \node[red] (fold) at (8.55,3.15) {folded GEMM\\结构折叠};
+        \node[blue] (pack) at (10.7,3.15) {ONNX打包\\inspect};
+
+        \node[green] (mask) at (0.65,1.65) {扰动采样\\delete/keep};
+        \node[green] (marg) at (2.75,1.65) {边际贡献\\$\Delta p$统计};
+        \node[green] (phys) at (4.85,1.65) {物理proxy\\冲击/周期/包络};
+        \node[green] (pool) at (6.95,1.65) {候选池\\$9\times8\times10$};
+        \node[green] (row) at (9.05,1.65) {逐类坐标搜索\\row-coordinate};
+        \node[blue] (eval) at (11.15,1.65) {devkit闭环\\score};
+
+        \node[red,minimum width=2.2cm] (final) at (6.9,0.35) {最终模型\\概率输出 + relevance map};
+
+        \draw[->] (data)--(audit);
+        \draw[->] (audit)--(base);
+        \draw[->] (base)--(calib);
+        \draw[->] (calib)--(fold);
+        \draw[->] (fold)--(pack);
+        \draw[->] (base.south) .. controls +(down:0.55cm) and +(up:0.55cm) .. (mask.north);
+        \draw[->] (mask)--(marg);
+        \draw[->] (marg)--(phys);
+        \draw[->] (phys)--(pool);
+        \draw[->] (pool)--(row);
+        \draw[->] (row)--(eval);
+        \draw[->] (fold.south) .. controls +(down:0.9cm) and +(right:0.8cm) .. (final.east);
+        \draw[->] (row.south) .. controls +(down:0.65cm) and +(up:0.55cm) .. (final.north);
+        \draw[->] (final.east) .. controls +(right:1.0cm) and +(down:0.65cm) .. (eval.south);
+    \end{tikzpicture}
+    \vspace{0.1cm}
+    \begin{block}{主线}
+        分类分支固定在高 F1 的 LogicLSTM；解释分支只优化 $F_{9\times8\times100}$ 的排序结构，所有候选必须经过完整 devkit 闭环验证后才能进入最终 ONNX。
+    \end{block}
+\end{frame}
+
+\begin{frame}{08 文献链路：从神经符号诊断到扰动解释}
+    \small
+    \begin{table}
+        \centering
+        \scriptsize
+        \begin{tabular}{p{0.24\textwidth}p{0.31\textwidth}p{0.34\textwidth}}
+            \toprule
+            方向 & 核心思想 & 在本方案中的落地 \\
+            \midrule
+            LogicLSTM, 2024 & 逻辑规则引导 LSTM 学习齿轮箱故障序列证据 & 保留官方高精度神经符号主干，不重新训练大模型 \\
+            Rule-Guided Transformer, 2026 & 规则作为旋转机械知识约束，提升故障适配性 & 规则只约束解释候选，不增加提交模型复杂度 \\
+            RISE / TimeREISE & 随机 mask 后观察输出变化，估计 saliency & 用 deletion/keep 边际贡献学习时间块权重 \\
+            WindowSHAP / GroupSegment-SHAP & 把连续窗口或通道组作为 Shapley player & 构造通道组$\times$时间段候选，再做类别行选择 \\
+            DynaMask / Learning Perturbations & 学习动态 mask 解释多变量时间序列 & 仅作为离线 teacher 方向，不把 mask 网络放进 ONNX \\
+            Spectral Kurtosis / Cyclostationarity & 机械故障具有冲击频带与周期统计结构 & 构造 impulse、periodic、envelope、lag proxy \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+    \begin{block}{核心取舍}
+        文献启发被压缩为离线候选生成器；最终提交仍是固定形状的概率输出与 relevance map，避免为了可解释性牺牲 simplicity。
+    \end{block}
+\end{frame}
+
+\begin{frame}{09 LogicLSTM 原理：门控记忆提取时序故障证据}
+    \small
+    \begin{columns}[T,onlytextwidth]
+        \begin{column}{0.53\textwidth}
+            \begin{block}{LSTM 单元}
+                \[
+                \begin{aligned}
+                i_t &= \sigma(W_i x_t + U_i h_{t-1}+b_i)\\
+                f_t &= \sigma(W_f x_t + U_f h_{t-1}+b_f)\\
+                o_t &= \sigma(W_o x_t + U_o h_{t-1}+b_o)\\
+                \tilde c_t &= \tanh(W_c x_t + U_c h_{t-1}+b_c)\\
+                c_t &= \boxed{\color{rucRed}{f_t \odot c_{t-1}}}
+                      + \boxed{\color{rucRed}{i_t \odot \tilde c_t}}\\
+                h_t &= o_t \odot \tanh(c_t)
+                \end{aligned}
+                \]
+            \end{block}
+        \end{column}
+        \begin{column}{0.43\textwidth}
+            \begin{block}{本题中的作用}
+                \begin{itemize}
+                    \tightitems
+                    \item $f_t$ 控制历史振动证据保留
+                    \item $i_t$ 控制当前冲击片段写入
+                    \item $h_T$ 汇聚 8 通道短窗口信息
+                    \item 分类头输出 $p=\mathrm{softmax}(W h_T+b)$
+                \end{itemize}
+            \end{block}
+            \begin{block}{使用方式}
+                主干参数冻结；后续只做 logit 校准、概率重绑定和解释图因子搜索。
+            \end{block}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+\begin{frame}{10 分类分支：logit 校准与概率重绑定}
+    \small
+    \begin{columns}[T,onlytextwidth]
+        \begin{column}{0.46\textwidth}
+            \begin{block}{具体操作}
+                \begin{enumerate}
+                    \tightitems
+                    \item 读取 LogicLSTM 输出 logits：$z$
+                    \item 搜索类别级校准参数：$s,b$
+                    \item 得到校准 logits：
+                    \[
+                        z'_k = s_k z_k + b_k
+                    \]
+                    \item 概率输出改为：
+                    \[
+                        p_k = \frac{\exp(z'_k)}{\sum_j\exp(z'_j)}
+                    \]
+                \end{enumerate}
+            \end{block}
+        \end{column}
+        \begin{column}{0.50\textwidth}
+            \begin{block}{工作量与效果}
+                \begin{itemize}
+                    \tightitems
+                    \item 针对少数混淆类别做 logit bias/scale 搜索
+                    \item relevance 使用校准后的 $p_k$ 做 soft class weighting
+                    \item 最终分类分支称为 \textbf{Logit-Folded LogicLSTM}
+                    \item Macro-F1 提升到 0.988280287
+                \end{itemize}
+            \end{block}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+\begin{frame}{11 TimeREISE：用扰动估计解释图权重}
+    \small
+    \begin{block}{目标}
+        为每个类别 $k$、通道 $c$、时间块 $b$ 学习离线权重 $F_{k,c,b}$，使重要区域在 deletion/insertion 评估中排在前面。
+    \end{block}
+    \begin{columns}[T,onlytextwidth]
+        \begin{column}{0.48\textwidth}
+            \begin{exampleblock}{删除贡献}
+                \[
+                    d_{c,b}=\max(p_y(x)-p_y(x_{\setminus c,b}),0)
+                \]
+                删除后置信度下降越多，说明该块对预测越关键。
+            \end{exampleblock}
+        \end{column}
+        \begin{column}{0.48\textwidth}
+            \begin{exampleblock}{插入贡献}
+                \[
+                    q_{c,b}=p_y(x_{c,b})-p_y(x_{\mathrm{base}})
+                \]
+                从 baseline 只插入该块后置信度恢复越多，说明局部证据越强。
+            \end{exampleblock}
+        \end{column}
+    \end{columns}
+    \[
+        F_{y,c,b}=\mathrm{Norm}\left(\alpha d_{c,b}+(1-\alpha)q_{c,b}-\lambda n_{c,b}\right)
+    \]
+\end{frame}
+
+\begin{frame}{12 TimeREISE 具体实现：从统计到 ONNX}
+    \small
+    \begin{center}
+        \begin{tikzpicture}[
+            font=\scriptsize,
+            node distance=0.95cm,
+            box/.style={draw,rounded corners,align=center,minimum width=2.25cm,minimum height=0.65cm,fill=white,inner sep=2pt},
+            >=Latex
+        ]
+            \node[box,fill=softBlue] (pred) {预测类别\\$y=\arg\max p$};
+            \node[box,fill=softGreen,right=of pred] (block) {8通道$\times$10块\\逐块扰动};
+            \node[box,fill=softGreen,right=of block] (gain) {drop/keep\\贡献统计};
+            \node[box,fill=softRed,right=of gain] (factor) {聚合归一化\\$F_{9\times8\times10}$};
+            \node[box,right=of factor] (onnx) {写入ONNX\\静态权重};
+            \draw[->] (pred)--(block);
+            \draw[->] (block)--(gain);
+            \draw[->] (gain)--(factor);
+            \draw[->] (factor)--(onnx);
+        \end{tikzpicture}
+    \end{center}
+    \begin{block}{推理阶段}
+        \[
+            R(x)=\sqrt{|x|}\cdot \sum_k p_k(x)\,F_k(c,b)
+        \]
+        其中 $p_k(x)$ 来自校准后概率分支。解释图随样本变化，但核心权重由离线扰动统计提供。
+    \end{block}
+\end{frame}
+
+\begin{frame}{13 时间块消融：b10 对齐评估粒度}
+    \small
+    \begin{columns}[T,onlytextwidth]
+        \begin{column}{0.52\textwidth}
+            \begin{table}
+                \centering
+                \scriptsize
+                \begin{tabular}{lccc}
+                    \toprule
+                    分块 & Faith & Deletion & Insertion \\
+                    \midrule
+                    b10 & \textbf{0.770607} & \textbf{0.146884} & \textbf{0.688098} \\
+                    b25 & 0.751326 & 0.173709 & 0.676361 \\
+                    b50 & 0.736649 & 0.195607 & 0.668905 \\
+                    \bottomrule
+                \end{tabular}
+            \end{table}
+        \end{column}
+        \begin{column}{0.44\textwidth}
+            \begin{block}{结论}
+                官方 faith 每 10\% 做一次 top-k mask。b10 将 100 点窗口切成 10 个块，统计粒度与评估粒度一致；b25/b50 更细但噪声更大。
+            \end{block}
+        \end{column}
+    \end{columns}
+    \vspace{0.1cm}
+    \begin{center}
+        \begin{tikzpicture}[x=0.105cm,y=0.48cm]
+            \foreach \i in {0,...,9} {
+                \pgfmathtruncatemacro{\shade}{12+\i*6}
+                \draw[fill=rucRed!\shade] (\i*10,0) rectangle +(10,1);
+                \node[font=\scriptsize] at (\i*10+5,0.5) {\i};
+            }
+            \node[font=\scriptsize] at (50,-0.65) {100点窗口 $\rightarrow$ 10个连续时间块};
+        \end{tikzpicture}
+    \end{center}
+\end{frame}
+
+\begin{frame}{14 GroupSegment 与 multi-scale：只作为行候选}
+    \small
+    \begin{table}
+        \centering
+        \scriptsize
+        \begin{tabular}{p{0.28\textwidth}p{0.23\textwidth}p{0.37\textwidth}}
+            \toprule
+            候选族 & 最好 teacher score & 实验结论 \\
+            \midrule
+            GroupSegment-TimeREISE & 0.921893268 & 全局融合弱；做 class row-coordinate 后有局部收益 \\
+            Multi-scale b5/b10/b20 & 0.922996531 & b5/b20 单独不强；采纳 class 2/6/8 的 b5 行后明显改善 \\
+            Motif / Shapelet prior & 0.923124249 & 高置信样本片段统计有效，是最终前一版主提升来源 \\
+            Condition-aware prior & \textbf{0.923149078} & 伪工况鲁棒聚合 + 行替换得到最终最优 \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+    \begin{block}{方法论}
+        这些候选不是直接平均进 relevance map，而是形成类别行候选池。每次只替换一个类别的 $8\times100$ 权重行，并以完整 devkit 分数决定是否接受。
+    \end{block}
+\end{frame}
+
+\begin{frame}{15 物理 proxy：把机械直觉转成候选权重}
+    \small
+    \begin{columns}[T,onlytextwidth]
+        \begin{column}{0.48\textwidth}
+            \begin{block}{局部冲击}
+                \[
+                    E_{\Delta}=\frac{1}{T}\sum_t(x_t-x_{t-1})^2
+                \]
+                \[
+                    P=\frac{\max_t |x_t|}{\sqrt{\frac{1}{T}\sum_t x_t^2}+\epsilon}
+                \]
+            \end{block}
+        \end{column}
+        \begin{column}{0.48\textwidth}
+            \begin{block}{周期/包络}
+                \[
+                    A(\ell)=\sum_t x_t x_{t-\ell},\quad \ell\in\mathcal{L}
+                \]
+                \[
+                    E_{\mathrm{env}}=\mathrm{mean}(\sqrt{\mathrm{smooth}(x_t^2)})
+                \]
+            \end{block}
+        \end{column}
+    \end{columns}
+    \begin{block}{落地方式}
+        每个 proxy 都先聚合为 $9\times8\times10$ 候选矩阵，再进入类别级候选池；最终只保留完整 devkit 得分有效的类别行。
+    \end{block}
+\end{frame}
+
+\begin{frame}{16 Motif / Shapelet prior：用高置信片段生成解释先验}
+    \small
+    \begin{columns}[T,onlytextwidth]
+        \begin{column}{0.50\textwidth}
+            \begin{block}{候选生成}
+                对每个类别取高置信样本，统计时间片段上的局部形态：
+                \[
+                    M_{k,c,b}=\mathrm{Quantile}_{q}
+                    \left(\phi(x_{i,c,t:t+\Delta})\mid \hat y_i=k\right)
+                \]
+                其中 $\phi$ 包括 raw、abs、diff、absdiff、coherence、peak、energy。
+            \end{block}
+        \end{column}
+        \begin{column}{0.46\textwidth}
+            \begin{block}{实验结果}
+                \begin{itemize}
+                    \tightitems
+                    \item 最好版本：\texttt{logic\_timereise\_motif\_prior\_rowcoord\_bestproxy}
+                    \item teacher score = 0.923124249
+                    \item faith = 0.799981274
+                    \item 后续 micro morph 仅改善 simplicity 报告，faith 无实质增益
+                \end{itemize}
+            \end{block}
+        \end{column}
+    \end{columns}
+    \begin{block}{结论}
+        shapelet 思路适合离线聚合为类别先验；不需要在线计算片段相似度，因此不会增加 ONNX operator。
+    \end{block}
+\end{frame}
+
+\begin{frame}{17 Condition-aware prior：伪工况鲁棒聚合}
+    \small
+    \begin{columns}[T,onlytextwidth]
+        \begin{column}{0.50\textwidth}
+            \begin{block}{伪工况定义}
+                validation metadata 缺少真实 speed/load 字段，因此用信号统计量构造 surrogate condition：
+                \[
+                    g(x)=\left[
+                    \mathrm{RMS},\ \mathrm{crest},\ \arg\max_\ell A(\ell),\
+                    E_{\mathrm{torque}},\ E_{\mathrm{PGB}}
+                    \right]
+                \]
+                分桶后分别估计 impulse / hybrid / periodic\_impulse proxy。
+            \end{block}
+        \end{column}
+        \begin{column}{0.46\textwidth}
+            \begin{block}{最终采纳}
+                \begin{itemize}
+                    \tightitems
+                    \item 脚本：\texttt{tools/run\_logic\_timereise\_condition\_prior\_search.py}
+                    \item 来源：\texttt{periodic\_impulse\_pgblag\_median\_pred\_raw\_power\_m0005}
+                    \item 替换行：class 1、2、6、7、8
+                    \item 最终 teacher score = \textbf{0.923149078}
+                \end{itemize}
+            \end{block}
+        \end{column}
+    \end{columns}
+    \begin{block}{结论}
+        全局融合没有超过起点；按类别行替换后有效，说明工况鲁棒性主要体现在特定故障类别的 relevance 排序上。
+    \end{block}
+\end{frame}
+
+\begin{frame}{18 类别级 row-coordinate：完整 devkit 闭环搜索}
+    \small
+    \begin{columns}[T,onlytextwidth]
+        \begin{column}{0.48\textwidth}
+            \begin{block}{算法}
+                \begin{enumerate}
+                    \tightitems
+                    \item 初始化当前权重 $W^{(0)}$
+                    \item 对类别 $k=0,\ldots,8$
+                    \item 从候选池取一行 $C_{k}^{(j)}$
+                    \item 构造 $W'$：只替换第 $k$ 行
+                    \item 导出 ONNX 并运行完整 devkit
+                    \item 若 $\mathrm{Score}(W')>\mathrm{Score}(W)$，接受替换
+                \end{enumerate}
+            \end{block}
+        \end{column}
+        \begin{column}{0.48\textwidth}
+            \begin{block}{类别差异}
+                \begin{itemize}
+                    \tightitems
+                    \item HEA：平滑、低冲击，降低正常样本偶然尖峰影响
+                    \item 齿轮类：齿轮通道、局部冲击、周期结构
+                    \item 轴承类：包络、尖峰、重复冲击
+                    \item CWF：允许多通道共同高亮
+                    \item 最终 condition prior 只接受 class 1/2/6/7/8
+                \end{itemize}
+            \end{block}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+\begin{frame}{19 文献思想到最终模型的压缩路径}
+    \small
+    \centering
+    \begin{tikzpicture}[
+        font=\scriptsize,
+        box/.style={draw,rounded corners,align=center,minimum width=3.05cm,minimum height=0.86cm,fill=white,inner sep=2pt},
+        >=Latex
+    ]
+        \node[box,fill=softBlue] (rise) at (0,2.4) {RISE / TimeREISE\\$\mathbb{E}[f(x\odot m)\,m]$};
+        \node[box,fill=softBlue] (shap) at (4.15,2.4) {WindowSHAP / GroupSegment\\片段与通道组作为player};
+        \node[box,fill=softBlue] (phys) at (8.3,2.4) {机械故障先验\\冲击/包络/周期/工况};
+        \node[box,fill=softGreen] (ours1) at (0,0.95) {drop/keep边际贡献\\$d_{c,b},q_{c,b}$};
+        \node[box,fill=softGreen] (ours2) at (4.15,0.95) {b10时间块\\$F_{9\times8\times10}$};
+        \node[box,fill=softGreen] (ours3) at (8.3,0.95) {proxy/motif/condition\\候选池};
+        \node[box,fill=softRed,minimum width=4.8cm] (final) at (4.15,-0.65) {类别级row-coordinate + 静态权重折叠\\低复杂度ONNX解释模型};
+        \draw[->] (rise)--(ours1);
+        \draw[->] (shap)--(ours2);
+        \draw[->] (phys)--(ours3);
+        \draw[->] (ours1)--(final);
+        \draw[->] (ours2)--(final);
+        \draw[->] (ours3)--(final);
+    \end{tikzpicture}
+\end{frame}
+
+\begin{frame}{20 Logit 重绑定与 folded GEMM}
+    \small
+    \begin{columns}[T,onlytextwidth]
+        \begin{column}{0.48\textwidth}
+            \begin{block}{问题定位}
+                logit 校准提升分类边界后，解释图如果仍读取旧概率，$R(x)$ 中的类别权重与最终预测不一致。
+            \end{block}
+            \[
+                R_{\mathrm{old}}(x)=\sqrt{|x|}\sum_k p_k^{\mathrm{old}}F_k
+            \]
+        \end{column}
+        \begin{column}{0.48\textwidth}
+            \begin{block}{修复}
+                \[
+                    R_{\mathrm{new}}(x)=\sqrt{|x|}\sum_k p_k^{\mathrm{calib}}F_k
+                \]
+                \[
+                    z'=Dz+b \Rightarrow \mathrm{GEMM}(W',b')
+                \]
+                校准折叠后 F1/Faith 不变；最终 condition prior 版本保持 24 个 operator，simplicity = 0.901614574。
+            \end{block}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+\section{实验分析}
+
+\begin{frame}{21 实验路线与阶段收益}
+    \small
+    \begin{table}
+        \centering
+        \scriptsize
+        \begin{tabular}{lccp{0.33\textwidth}}
+            \toprule
+            阶段 & Macro-F1 & Faith & 作用 \\
+            \midrule
+            spectral v1 & 0.912 & 0.575 & 端到端训练与 ONNX 流程验证 \\
+            LogicLSTM baseline & 0.9837 & -- & 建立高 F1 分类主干 \\
+            marginal b10 & 0.9837 & 0.770607 & 解释粒度与 top-k 评估对齐 \\
+            power ensemble & 0.9837 & 0.7836 & deletion/insertion 双侧收益 \\
+            row-coordinate ext & 0.9837 & 0.795904 & 类别级 relevance 行选择有效 \\
+            logit folded GEMM & 0.9883 & 0.794899 & 分类校准；teacher score 0.921599 \\
+            motif prior rowcoord & 0.9883 & 0.799981 & shapelet/motif 先验成为主提升来源 \\
+            condition prior final & \textbf{0.9883} & \textbf{0.800065} & 最终 teacher score \textbf{0.923149} \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+    \begin{block}{阶段性结论}
+        分数提升不是单点调参，而是由三条线叠加：分类边界校准提升 Macro-F1；TimeREISE 与物理/形态先验提升 Faith；折叠静态权重保持 Simplicity。
+    \end{block}
+\end{frame}
+
+\begin{frame}{22 排查问题与约束处理}
+    \small
+    \centering
+    \begin{tikzpicture}[
+        font=\scriptsize,
+        card/.style={draw,rounded corners,align=left,text width=5.15cm,minimum height=1.15cm,fill=white,inner sep=5pt}
+    ]
+        \node[card,fill=softBlue] at (0,2.0) {\textbf{问题1：自训CNN/TCN分类上限不足}\\先用频谱模型验证流程，再切换到官方LogicLSTM主干，避免在低F1模型上优化解释。};
+        \node[card,fill=softGreen] at (5.9,2.0) {\textbf{问题2：全局融合经常负收益}\\GroupSegment、multi-scale、condition候选均改为类别行候选，由完整devkit逐行选择。};
+        \node[card,fill=softGreen] at (0,0.45) {\textbf{问题3：ONNX initializer 重名}\\condition prior 脚本将起始 tag 从 timereise\_start 改为 condition\_start，避免图初始化冲突。};
+        \node[card,fill=softRed] at (5.9,0.45) {\textbf{问题4：排序口径不一致}\\最终全部按 $0.6$F1+$0.3$Faith+$0.1$Simplicity 排序，不用局部proxy直接决定提交。};
+    \end{tikzpicture}
+\end{frame}
+
+\begin{frame}{23 创新点总结}
+    \small
+    \begin{columns}[T,onlytextwidth]
+        \begin{column}{0.48\textwidth}
+            \begin{block}{方法创新}
+                \begin{itemize}
+                    \tightitems
+                    \item evaluation-aligned b10 时间块解释
+                    \item drop/keep 双侧边际贡献融合
+                    \item GroupSegment / motif / condition 候选池
+                    \item prediction-weighted relevance 重绑定
+                \end{itemize}
+            \end{block}
+        \end{column}
+        \begin{column}{0.48\textwidth}
+            \begin{block}{工程创新}
+                \begin{itemize}
+                    \tightitems
+                    \item 类别级 row-coordinate 完整devkit搜索
+                    \item logit bias/scale 校准分类边界
+                    \item 静态权重与 folded GEMM 保持 simplicity
+                    \item 候选包 inspect 与 hash 校验闭环
+                \end{itemize}
+            \end{block}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+\section{总结}
+
+\begin{frame}{24 工作量与结论}
+    \begin{block}{工作量}
+        完成数据审计、主干模型选择、ONNX 导出、devkit 评估、TimeREISE 权重搜索、GroupSegment/multi-scale/motif/condition 候选构造、row-coordinate 搜索和提交包校验。
+    \end{block}
+    \begin{block}{最终方案}
+        Logit-Folded LogicLSTM + TimeREISE 离线扰动解释 + motif/condition-aware prior + 类别级 row-coordinate + 静态 relevance 权重折叠。
+    \end{block}
+    \begin{block}{最终结果}
+        Macro-F1 = 0.988280287，Faith = 0.800064828，Simplicity = 0.901614574，Teacher score = \textbf{0.923149078}。
+    \end{block}
+    \begin{center}
+        \large 谢谢大家
+    \end{center}
+\end{frame}
+
+\end{document}

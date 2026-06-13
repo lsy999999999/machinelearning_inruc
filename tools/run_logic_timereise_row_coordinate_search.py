@@ -4,8 +4,10 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from json import JSONDecodeError
 
 import numpy as np
+import onnx
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -14,6 +16,17 @@ from tools.run_logic_timereise_class_candidate_selection import load_manifest_ca
 from tools.run_logic_timereise_power_ensemble_search import extract_timereise_weights
 from tools.run_logic_timereise_search import make_variant, package_model, report_scores, run_eval_subprocess
 from tools.timereise_branch_utils import load_base_model
+
+
+def write_variant(base_model, output_dir: Path, tag: str, weights: np.ndarray) -> Path:
+    model_path = output_dir / f"logic_timereise_{tag}.onnx"
+    if model_path.exists():
+        try:
+            onnx.checker.check_model(onnx.load(model_path))
+            return model_path
+        except Exception:
+            model_path.unlink()
+    return make_variant(base_model, output_dir, tag, weights, hard=False)
 
 
 def parse_args() -> argparse.Namespace:
@@ -28,15 +41,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-batch-size", type=int, default=512)
     parser.add_argument("--passes", type=int, default=2)
     parser.add_argument("--min-delta", type=float, default=1e-7)
+    parser.add_argument("--tag-prefix", default="coord_search")
     parser.add_argument("--copy-prefix", default="logic_timereise_row_coordinate")
     parser.add_argument("--no-package", action="store_true")
     return parser.parse_args()
 
 
 def evaluate_model(model_path: Path, report_path: Path, args: argparse.Namespace) -> dict[str, float]:
-    if not report_path.exists():
+    if report_path.exists():
+        try:
+            faith, deletion, insertion, f1, simplicity, proxy = report_scores(report_path)
+        except (JSONDecodeError, KeyError):
+            report_path.unlink()
+            run_eval_subprocess(str(model_path), report_path, args)
+            faith, deletion, insertion, f1, simplicity, proxy = report_scores(report_path)
+    else:
         run_eval_subprocess(str(model_path), report_path, args)
-    faith, deletion, insertion, f1, simplicity, proxy = report_scores(report_path)
+        faith, deletion, insertion, f1, simplicity, proxy = report_scores(report_path)
     new_score = 0.6 * f1 + 0.3 * faith + 0.1 * simplicity
     return {
         "faith": faith,
@@ -74,8 +95,8 @@ def main() -> None:
             continue
         candidate_weights[name] = extract_timereise_weights(model_path)
 
-    start_tag = "coord_search_start"
-    current_path = make_variant(base_model, output_dir, start_tag, current, hard=False)
+    start_tag = f"{args.tag_prefix}_start"
+    current_path = write_variant(base_model, output_dir, start_tag, current)
     current_report = eval_dir / f"{start_tag}.json"
     current_metrics = evaluate_model(current_path, current_report, args)
     history: list[dict[str, object]] = [
@@ -98,10 +119,8 @@ def main() -> None:
             for name, weights in candidate_weights.items():
                 trial = current.copy()
                 trial[class_id] = weights[class_id]
-                tag = f"p{pass_id}_c{class_id}_{name}"
-                model_path = output_dir / f"logic_timereise_{tag}.onnx"
-                if not model_path.exists():
-                    make_variant(base_model, output_dir, tag, trial, hard=False)
+                tag = f"{args.tag_prefix}_p{pass_id}_c{class_id}_{name}"
+                model_path = write_variant(base_model, output_dir, tag, trial)
                 metrics = evaluate_model(model_path, eval_dir / f"{tag}.json", args)
                 if metrics["new_score"] > best_metrics["new_score"] + args.min_delta:
                     best_name = name
@@ -112,8 +131,8 @@ def main() -> None:
                 step += 1
                 current = best_weights
                 current_metrics = best_metrics
-                step_tag = f"coord_search_update{step}"
-                current_path = make_variant(base_model, output_dir, step_tag, current, hard=False)
+                step_tag = f"{args.tag_prefix}_update{step}"
+                current_path = write_variant(base_model, output_dir, step_tag, current)
                 current_report = eval_dir / f"{step_tag}.json"
                 current_metrics = evaluate_model(current_path, current_report, args)
                 improved_in_pass = True

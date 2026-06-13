@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Iterator
 
 import numpy as np
+import onnx
 import onnxruntime as ort
 import torch
 from torch.utils.data import DataLoader
@@ -18,6 +19,18 @@ from gearxai_project.utils import load_config
 from tools.run_logic_timereise_offline_innovation_search import add_offline_contrast
 from tools.run_logic_timereise_search import expand_bins, make_variant, normalize_importance, time_blocks
 from tools.timereise_branch_utils import load_base_model, score_and_package_manifest
+
+
+def write_variant(base_model: onnx.ModelProto, output_dir: Path, tag: str, weights: np.ndarray, hard: bool) -> Path:
+    suffix = f"{tag}_hard" if hard else tag
+    model_path = output_dir / f"logic_timereise_{suffix}.onnx"
+    if model_path.exists():
+        try:
+            onnx.checker.check_model(onnx.load(model_path))
+            return model_path
+        except Exception:
+            model_path.unlink()
+    return make_variant(base_model, output_dir, tag, weights, hard)
 
 
 def marginal_stats_path(output_dir: Path) -> Path:
@@ -307,9 +320,7 @@ def main() -> None:
     for tag, weights in build_specs(args, output_dir):
         for hard in ([False, True] if args.include_hard else [False]):
             suffix = f"{tag}_hard" if hard else tag
-            model_path = output_dir / f"logic_timereise_{suffix}.onnx"
-            if not model_path.exists():
-                make_variant(base_model, output_dir, tag, weights, hard)
+            model_path = write_variant(base_model, output_dir, tag, weights, hard)
             manifest.append({"tag": suffix, "model": str(model_path), "branch": "marginal"})
     print(f"Prepared {len(manifest)} marginal TimeREISE variants", flush=True)
     score_and_package_manifest(manifest, output_dir, args, copy_prefix=args.copy_prefix)
